@@ -231,11 +231,13 @@ cat("Testing set dimensions:", dim(test_data), "\n")
 
 ```
 
+TODO  (Sarah?): Logit model assumptions. Understand if the data meets these assumptions.
+
 ```{r}
 # Fit logistic regression model
 logistic_model <- glm(target ~ age + sex + cp + trestbps + chol + fbs + restecg +
                       thalach + exang + oldpeak + slope + ca + thal,
-                      data = heart_data, family = "binomial")
+                      data = heart_data_clean, family = "binomial")
 
 # Print summary of the model
 summary(logistic_model)
@@ -247,13 +249,13 @@ predicted_probs <- predict(logistic_model, newdata = test_data, type = "response
 ```
 Fitting a logistic regression model, the independent variables with a p-value < 0.05 can be interpreted as such:
 
-The estimated coefficient for 'sex' is -1.8465, indicating that being female is associated with a 1.8465 decrease in the log odds of having heart disease compared to being male.
+The estimated coefficient for 'sex' is -1.751, indicating that being female is associated with a 1.751 decrease in the log odds of having heart disease compared to being male.
 
 The estimated coefficient for chest pain (cp) indicates a 0.85 increase in log odds of having heart disease for every one unit increase in the categorical representation of chest pain.
 
 The model indicates that a one unit increase in resting blood pressure (trestbps) is associated with a 0.018 decrease in the log odds of having heart disease.
 
-The model also indicates that cholesterol is a significant predictor, with a decrease of 0.00567 in the log odds of having heart disease for every 1 unit increase in cholesterol. 
+The model also indicates that cholesterol is a significant predictor, with a decrease of 0.004489 in the log odds of having heart disease for every 1 unit increase in cholesterol. This does not seem reasnable, as a significant increase in cholesterol would surely increase the probability of heart disease. This demonstrates the importance of having a decent understanding of data one is working with, because this discovery indicates that the model assumptions for logistic regression must be reevaluated. The most likely assumption to be violated is the absence of multicollinearity, given the interconnecting nature of physical health and the corresponding features in the data frame.
 
 Other significant predictors include resting electrocardiograph results (restecg), maximum heart rate achieved during exercise (thalach), exercise induced angia (exang), oldpeak, the slope of the peak exercises, number of major vessels colored by fluoroscopy (ca), and Thallium stress testing (thal), which is a type of nuclear imaging test used to evaluate blood flow to the heart.
 
@@ -322,3 +324,42 @@ The sensitivity of 96.97% indicates that the model performed well in correctly i
 
 The high specificity and sensitivity values are promising, suggesting that your model is effective in both ruling out healthy individuals and identifying those with heart disease. Overall,the logistic regression model is well performing.
 
+
+Health data often exhibits multicollinearity, so applying ridge regression will retain the features while also shrinking them down to prevent over fitting. 
+
+```{r}
+# Assuming 'heart_data_clean' is your cleaned dataset
+
+# Split the data into training and testing sets
+set.seed(445)  # Set seed for reproducibility
+split_index <- createDataPartition(heart_data_clean$target, p = 0.8, list = FALSE)
+train_data <- heart_data_clean[split_index, ]
+test_data <- heart_data_clean[-split_index, ]
+
+# Convert target variable to factor
+train_data$target <- factor(train_data$target, levels = c(0, 1))
+test_data$target <- factor(test_data$target, levels = c(0, 1))
+
+# Logistic Regression Model
+logistic_model <- glm(target ~ age + sex + cp + trestbps + chol + fbs + 
+                      restecg + thalach + exang + oldpeak + slope + ca + thal,
+                      data = train_data, family = "binomial")
+
+# Ridge Regression Model
+ridge_model <- train(
+  target ~ .,  # Adjust for your actual formula
+  data = train_data,
+  method = "glmnet",
+  trControl = trainControl(method = "cv", number = 5),  # Cross-validation with 5 folds
+  tuneGrid = expand.grid(alpha = 0, lambda = seq(0.1, 1, by = 0.1))  # Adjust lambda values
+)
+
+# Model Evaluation
+predictions_logistic <- predict(logistic_model, newdata = test_data, type = "response")
+predictions_ridge <- predict(ridge_model, newdata = test_data)
+
+# Evaluate Ridge Regression Model
+ridge_confusion <- confusionMatrix(predictions_ridge, test_data$target, positive = "1")
+print("Ridge Regression Model:")
+print(ridge_confusion)
+```
