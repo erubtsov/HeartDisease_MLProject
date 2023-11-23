@@ -1,0 +1,324 @@
+```{r}
+# Install and load the necessary library if not already installed
+if (!require("readr")) {
+  install.packages("readr")
+}
+library(readr)
+
+# Set the file path to your "heart.csv" file
+file_path <- "/data/accounts/fa23/ericrubtsov/DSCI445/DSCI 445 Heart Disease Project/heart.csv"
+
+# Read the CSV file into a data frame
+heart_data <- read_csv(file_path)
+
+# Display the first few rows of the data for inspection
+print(heart_data)
+
+# Subset the dataset to include only numerical columns
+numerical_data <- heart_data[sapply(heart_data, is.numeric)]
+
+# Apply the summary function to generate summary statistics
+summary_stats <- summary(numerical_data)
+
+# Print the well-formatted summary statistics
+print(summary_stats)
+```
+
+
+```{r}
+na_values <- any(is.na(heart_data))
+# Display the result
+if (na_values) {
+  cat("There are NA values in the dataset.\n")
+  # Display the count of NA values for each column
+  col_na_count <- colSums(is.na(heart_data))
+  print("Col NA: ", col_na_count)
+} else {
+  cat("There are no NA values in the dataset.\n")
+}
+```
+
+```{r}
+# Function to identify outliers using IQR for a given column
+identify_outliers <- function(column) {
+  if (is.numeric(column)) {
+    q1 <- quantile(column, 0.25)
+    q3 <- quantile(column, 0.75)
+    iqr <- q3 - q1
+    lower_bound <- q1 - 1.5 * iqr
+    upper_bound <- q3 + 1.5 * iqr
+    outliers <- column < lower_bound | column > upper_bound
+    return(outliers)
+  } else {
+    # If the column is not numeric, return a logical vector of the same length
+    return(rep(FALSE, length(column)))
+  }
+}
+
+# Apply the function to each numerical column in the dataset
+numerical_columns <- sapply(heart_data, is.numeric)
+
+# Initialize an empty data frame to store outlier information
+outliers_df <- data.frame(variable = character(0), value = logical(0))
+
+# Initialize a list to store histogram objects
+histograms <- list()
+
+# Loop through each numerical column
+for (col in names(heart_data[, numerical_columns])) {
+  outliers <- identify_outliers(heart_data[, col])
+  
+  # Check if there are outliers before attempting to append to the data frame
+  if (any(outliers)) {
+    outliers_df <- rbind(outliers_df, data.frame(variable = rep(col, sum(outliers)), value = outliers))
+  }
+
+  # Create histogram for the column
+  hist_obj <- ggplot(heart_data, aes(x = get(col))) +
+    geom_histogram(fill = "skyblue", color = "black", bins = 20) +
+    labs(title = paste("Histogram for", col), x = col, y = "Frequency") +
+    theme_minimal()
+  
+  # Append the histogram object to the list
+  histograms[[col]] <- hist_obj
+}
+
+# Display the data frame with outliers
+print(outliers_df)
+
+# Display the histograms
+for (col in names(histograms)) {
+  print(histograms[[col]])
+}
+
+#The target histogram takes values 0 and 1, indicating the presence of heart disease or not
+```
+
+```{r}
+# Filter rows with chol > 500
+rows_chol_gt_500 <- heart_data[heart_data$chol > 500, ]
+
+# Display the rows
+print(rows_chol_gt_500)
+# Install and load the necessary library if not already installed
+if (!require("dplyr")) install.packages("dplyr")
+library(dplyr)
+
+# Specify the columns based on which you want to identify duplicates
+columns_to_check <- c("age", "sex", "cp", "trestbps", "chol", "fbs", "restecg", "thalach", "exang", "oldpeak", "slope", "ca", "thal", "target")
+
+# Remove duplicates based on the specified columns
+heart_data_clean <- distinct(heart_data, !!!syms(columns_to_check))
+
+# View the updated dataframe
+print(heart_data_clean)
+```
+
+```{r}
+# Initialize a list to store histogram objects
+histograms <- list()
+
+# Loop through each numerical column
+for (col in names(heart_data_clean[, numerical_columns])) {
+
+  # Create histogram for the column
+  hist_obj <- ggplot(heart_data, aes(x = get(col))) +
+    geom_histogram(fill = "skyblue", color = "black", bins = 20) +
+    labs(title = paste("Histogram for", col), x = col, y = "Frequency") +
+    theme_minimal()
+  
+  # Append the histogram object to the list
+  histograms[[col]] <- hist_obj
+}
+
+# Display the data frame with outliers
+print(outliers_df)
+
+# Display the histograms
+for (col in names(histograms)) {
+  print(histograms[[col]])
+  
+#Dropping the duplicate values reduces the dataset to 302 rows. The distributions among the columns stay the same, so removing duplicates did not adversely affect the information given by the original data set
+}
+```
+
+```{r}
+
+# Install and load necessary libraries if not already installed
+if (!require("readr")) install.packages("readr")
+if (!require("ggplot2")) install.packages("ggplot2")
+if (!require("dplyr")) install.packages("dplyr")
+
+library(readr)
+library(ggplot2)
+library(dplyr)
+
+# Read the CSV file into a data frame
+heart_data <- read_csv(file_path)
+
+# Display the structure and summary of the dataset
+str(heart_data)
+summary(heart_data_clean)
+
+# Identify categorical and continuous variables
+categorical_vars <- c("sex", "cp", "fbs", "restecg", "exang", "slope", "ca", "thal", "target")
+continuous_vars <- setdiff(names(heart_data_clean), categorical_vars)
+
+# Visualize the distribution of continuous variables (correlation matrix)
+correlation_matrix <- cor(heart_data[, continuous_vars])
+ggplot(data = as.data.frame(as.table(correlation_matrix)), aes(Var1, Var2, fill = Freq)) +
+  geom_tile(color = "white") +
+  scale_fill_gradient2(low = "blue", high = "red", mid = "white", midpoint = 0, limit = c(-1, 1), space = "Lab",
+                       name = "Correlation") +
+  theme_minimal() +
+  labs(title = "Correlation Matrix for Continuous Variables")
+
+# Visualize association plots for each categorical variable
+association_plots <- lapply(categorical_vars, function(var) {
+  ggplot(heart_data, aes(x = as.factor(.data[[var]]), fill = as.factor(target))) +
+    geom_bar(position = "fill") +
+    labs(title = paste("Association between", var, "and Target"),
+         x = var, y = "Proportion") +
+    scale_fill_manual(values = c("0" = "blue", "1" = "red"))
+})
+
+# Print association plots
+for (i in seq_along(association_plots)) {
+  print(association_plots[[i]])
+}
+
+```
+
+The Chi-squared tests are run on each categorical variable to assess whether there is significant association between that variable and the target variable (heart disease or not)
+
+```{r}
+# Assuming `target` is the binary outcome variable of interest
+categorical_vars <- c("sex", "cp", "fbs", "restecg", "exang", "slope", "ca", "thal")
+
+# Run chi-squared tests for each categorical variable
+chi_squared_results <- lapply(categorical_vars, function(var) {
+  contingency_table <- table(heart_data[[var]], heart_data$target)
+  chi_squared_test_result <- chisq.test(contingency_table)
+  return(list(variable = var, chi_squared_test = chi_squared_test_result))
+})
+
+# Print results
+for (result in chi_squared_results) {
+  cat("Chi-squared test for", result$variable, ":\n")
+  print(result$chi_squared_test)
+  cat("\n")
+}
+```
+
+```{r}
+if (!require("caret")) install.packages("caret")
+
+library(caret)
+
+# Set a random seed for reproducibility
+set.seed(445)
+
+# Create an index for the train-test split
+index <- createDataPartition(heart_data_clean$target, p = 0.8, list = FALSE)
+
+# Split the data into training and testing sets
+train_data <- heart_data_clean[index, ]
+test_data <- heart_data_clean[-index, ]
+
+# Display the dimensions of the training and testing sets
+cat("Training set dimensions:", dim(train_data), "\n")
+cat("Testing set dimensions:", dim(test_data), "\n")
+
+```
+
+```{r}
+# Fit logistic regression model
+logistic_model <- glm(target ~ age + sex + cp + trestbps + chol + fbs + restecg +
+                      thalach + exang + oldpeak + slope + ca + thal,
+                      data = heart_data, family = "binomial")
+
+# Print summary of the model
+summary(logistic_model)
+
+
+# Predict on the test data
+predicted_probs <- predict(logistic_model, newdata = test_data, type = "response")
+ 
+```
+Fitting a logistic regression model, the independent variables with a p-value < 0.05 can be interpreted as such:
+
+The estimated coefficient for 'sex' is -1.8465, indicating that being female is associated with a 1.8465 decrease in the log odds of having heart disease compared to being male.
+
+The estimated coefficient for chest pain (cp) indicates a 0.85 increase in log odds of having heart disease for every one unit increase in the categorical representation of chest pain.
+
+The model indicates that a one unit increase in resting blood pressure (trestbps) is associated with a 0.018 decrease in the log odds of having heart disease.
+
+The model also indicates that cholesterol is a significant predictor, with a decrease of 0.00567 in the log odds of having heart disease for every 1 unit increase in cholesterol. 
+
+Other significant predictors include resting electrocardiograph results (restecg), maximum heart rate achieved during exercise (thalach), exercise induced angia (exang), oldpeak, the slope of the peak exercises, number of major vessels colored by fluoroscopy (ca), and Thallium stress testing (thal), which is a type of nuclear imaging test used to evaluate blood flow to the heart.
+
+The inferences made in this discussion were for example purposes, and can be applied similarly to the other significant predictors. The associated change in log odds and respective p-values for these predictors are referenced in the summary above.
+
+The encoded categorical variables for chest pain and thal are ordinal, which means that their order in the encoding is ranked by increasing severity for predicting heart disease.
+
+From the logistic regression model, it appears that certain significant predictors increasing by 1 are associated with a decrease in the log odds of having heart disease. More investigation can be done in these areas to understand the true relationships.
+
+
+```{r}
+true_labels <- test_data$target
+
+predicted_probs <- predict(logistic_model, newdata = test_data, type = "response")
+
+# Convert predicted probabilities to binary predictions (0 or 1)
+predicted_labels <- ifelse(predicted_probs > 0.5, 1, 0)
+
+# Confusion Matrix
+conf_matrix <- table(True_Labels = true_labels, Predicted_Labels = predicted_labels)
+print("Confusion Matrix:")
+print(conf_matrix)
+
+# Accuracy
+accuracy <- sum(diag(conf_matrix)) / sum(conf_matrix)
+print(paste("Accuracy:", round(accuracy, 4)))
+
+# Specificity
+specificity <- conf_matrix[2, 2] / sum(conf_matrix[2, ])
+print(paste("Specificity:", round(specificity, 4)))
+
+# Sensitivity (True Positive Rate or Recall)
+tp <- sum(predicted_labels == 1 & true_labels == 1)
+fn <- sum(predicted_labels == 0 & true_labels == 1)
+sensitivity <- tp / (tp + fn)
+
+print(paste("Sensitivity:", round(sensitivity, 4)))
+
+
+# ROC Curve
+library(pROC)
+
+# Create ROC curve
+roc_curve <- roc(true_labels, predicted_probs)
+
+# Plot ROC curve
+plot(roc_curve, main = "ROC Curve", col = "blue", lwd = 2)
+
+# Add AUC value to the plot
+auc_value <- round(auc(roc_curve), 3)
+text(0.7, 0.2, paste("AUC =", auc_value), col = "red", cex = 1.2)
+
+# Calculate sensitivity and specificity for various thresholds
+roc_points <- coords(roc_curve, "best", ret = c("threshold", "sens", "spec"))
+print("Threshold, Sensitivity, Specificity:")
+print(roc_points)
+
+```
+Accuracy = (TN + TP)/(TN + FN + TP + FP)
+Sensitivity = TP/(TP + FN)
+Specificity = TN/(TN + FP)
+
+The specificity of 96.97% suggests that the model performed very well in correctly identifying instances without heart disease (class 0). This is important for ruling out individuals who do not have heart disease.
+
+The sensitivity of 96.97% indicates that the model performed well in correctly identifying individuals with heart disease (class 1). This is crucial for detecting individuals who actually have heart disease.
+
+The high specificity and sensitivity values are promising, suggesting that your model is effective in both ruling out healthy individuals and identifying those with heart disease. Overall,the logistic regression model is well performing.
+
