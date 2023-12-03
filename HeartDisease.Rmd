@@ -1,9 +1,22 @@
+---
+output:
+  pdf_document: default
+  html_document: default
+---
+
 ```{r}
-# Install and load the necessary library if not already installed
-if (!require("readr")) {
-  install.packages("readr")
-}
+
+library(dplyr)
 library(readr)
+library(pROC)
+library(tidymodels)
+library(workflows)
+library(caret)
+library(glmnet)
+
+```
+
+```{r}
 
 # Set the file path to your "heart.csv" file
 file_path <- "/data/accounts/fa23/ericrubtsov/DSCI445/DSCI 445 Heart Disease Project/heart.csv"
@@ -39,6 +52,7 @@ if (na_values) {
 ```
 
 ```{r}
+
 # Function to identify outliers using IQR for a given column
 identify_outliers <- function(column) {
   if (is.numeric(column)) {
@@ -100,9 +114,7 @@ rows_chol_gt_500 <- heart_data[heart_data$chol > 500, ]
 
 # Display the rows
 print(rows_chol_gt_500)
-# Install and load the necessary library if not already installed
-if (!require("dplyr")) install.packages("dplyr")
-library(dplyr)
+
 
 # Specify the columns based on which you want to identify duplicates
 columns_to_check <- c("age", "sex", "cp", "trestbps", "chol", "fbs", "restecg", "thalach", "exang", "oldpeak", "slope", "ca", "thal", "target")
@@ -144,14 +156,6 @@ for (col in names(histograms)) {
 
 ```{r}
 
-# Install and load necessary libraries if not already installed
-if (!require("readr")) install.packages("readr")
-if (!require("ggplot2")) install.packages("ggplot2")
-if (!require("dplyr")) install.packages("dplyr")
-
-library(readr)
-library(ggplot2)
-library(dplyr)
 
 # Read the CSV file into a data frame
 heart_data <- read_csv(file_path)
@@ -173,21 +177,57 @@ ggplot(data = as.data.frame(as.table(correlation_matrix)), aes(Var1, Var2, fill 
   theme_minimal() +
   labs(title = "Correlation Matrix for Continuous Variables")
 
-# Visualize association plots for each categorical variable
-association_plots <- lapply(categorical_vars, function(var) {
+library(patchwork)
+# Function to create association plot for a categorical variable without individual titles
+create_association_plot <- function(var) {
   ggplot(heart_data, aes(x = as.factor(.data[[var]]), fill = as.factor(target))) +
     geom_bar(position = "fill") +
-    labs(title = paste("Association between", var, "and Target"),
-         x = var, y = "Proportion") +
-    scale_fill_manual(values = c("0" = "blue", "1" = "red"))
-})
-
-# Print association plots
-for (i in seq_along(association_plots)) {
-  print(association_plots[[i]])
+    labs(x = var, y = "Proportion") +
+    scale_fill_manual(values = c("0" = "blue", "1" = "red")) +
+    theme(axis.title.x = element_text(size = 10),  # Adjust x-axis title size
+          axis.text.x = element_text(size = 8, angle = 45, hjust = 1),  # Adjust x-axis text size and rotation
+          plot.title = element_text(size = 12, hjust = 0.5, margin = margin(b = 10)))  # Adjust main title size and margin
 }
 
+# Create association plots without individual titles
+association_plots <- lapply(categorical_vars, create_association_plot)
+
+# Combine plots onto one page with adjusted margins and spacing
+association_plots_combined <- wrap_plots(association_plots, ncol = 3, guides = 'collect') +
+  plot_layout(widths = c(1, 1, 1), heights = c(1, 1, 1), guides = 'collect') +
+  ggtitle("Associations between variables and target")  # Add main title
+
+# Print the combined plot
+print(association_plots_combined)
+
 ```
+
+The correlation matrix provides insight on the variable trends with respect to each other. The plot shows that there are more notable negative correlations within the metrics. One such negative correlation would be 'Age' and 'Thalach'. This strong negative correlation indicates that as age increases, maximum heart rate tends to decrease, which makes sense. Other sensible ne
+
+```{r}
+# Scatter plot for Cholesterol Levels (chol) and Exercise-Induced Angina (exang)
+scatter_chol_exang <- ggplot(heart_data, aes(x = chol, y = exang, color = as.factor(exang))) +
+  geom_point() +
+  labs(title = "Cholesterol Levels vs. Exercise-Induced Angina",
+       x = "Cholesterol Levels",
+       y = "Exercise-Induced Angina") +
+  scale_color_manual(values = c("0" = "blue", "1" = "red")) +
+  theme_minimal()
+
+# Scatter plot for Resting Blood Pressure (trestbps) and Exercise-Induced Angina (exang)
+scatter_trestbps_exang <- ggplot(heart_data, aes(x = trestbps, y = exang, color = as.factor(exang))) +
+  geom_point() +
+  labs(title = "Resting Blood Pressure vs. Exercise-Induced Angina",
+       x = "Resting Blood Pressure",
+       y = "Exercise-Induced Angina") +
+  scale_color_manual(values = c("0" = "blue", "1" = "red")) +
+  theme_minimal()
+
+# Display the scatter plots side by side
+library(gridExtra)
+grid.arrange(scatter_chol_exang, scatter_trestbps_exang, ncol = 2)
+```
+
 
 The Chi-squared tests are run on each categorical variable to assess whether there is significant association between that variable and the target variable (heart disease or not)
 
@@ -197,7 +237,7 @@ categorical_vars <- c("sex", "cp", "fbs", "restecg", "exang", "slope", "ca", "th
 
 # Run chi-squared tests for each categorical variable
 chi_squared_results <- lapply(categorical_vars, function(var) {
-  contingency_table <- table(heart_data[[var]], heart_data$target)
+  contingency_table <- table(heart_data_clean[[var]], heart_data_clean$target)
   chi_squared_test_result <- chisq.test(contingency_table)
   return(list(variable = var, chi_squared_test = chi_squared_test_result))
 })
@@ -211,9 +251,6 @@ for (result in chi_squared_results) {
 ```
 
 ```{r}
-if (!require("caret")) install.packages("caret")
-
-library(caret)
 
 # Set a random seed for reproducibility
 set.seed(445)
@@ -221,17 +258,24 @@ set.seed(445)
 # Create an index for the train-test split
 index <- createDataPartition(heart_data_clean$target, p = 0.8, list = FALSE)
 
+summary(heart_data_clean)
+
 # Split the data into training and testing sets
 train_data <- heart_data_clean[index, ]
 test_data <- heart_data_clean[-index, ]
 
 # Display the dimensions of the training and testing sets
-cat("Training set dimensions:", dim(train_data), "\n")
+cat("\nTraining set dimensions:", dim(train_data), "\n")
 cat("Testing set dimensions:", dim(test_data), "\n")
 
 ```
 
 TODO  (Sarah?): Logit model assumptions. Understand if the data meets these assumptions.
+
+It is important to discuss the assumptions of the underlying data when fitting a logistic regression model. The first assumption is the linearity of log-odds, which means that the relationship between the independent variables and the log-odds of the dependent variable is linear. Other model assumptions include the observations of the datset being independent of each other, independent variables are not highly correlated with each other, homoscedascity of residuals, no outliers or influential points, and a Binary outcome variable. 
+
+We have established in our correlation matrix that there are negatively correlated
+
 
 ```{r}
 # Fit logistic regression model
@@ -265,7 +309,6 @@ The encoded categorical variables for chest pain and thal are ordinal, which mea
 
 From the logistic regression model, it appears that certain significant predictors increasing by 1 are associated with a decrease in the log odds of having heart disease. More investigation can be done in these areas to understand the true relationships.
 
-
 ```{r}
 true_labels <- test_data$target
 
@@ -294,10 +337,6 @@ sensitivity <- tp / (tp + fn)
 
 print(paste("Sensitivity:", round(sensitivity, 4)))
 
-
-# ROC Curve
-library(pROC)
-
 # Create ROC curve
 roc_curve <- roc(true_labels, predicted_probs)
 
@@ -324,14 +363,10 @@ The sensitivity of 96.97% indicates that the model performed well in correctly i
 
 The high specificity and sensitivity values are promising, suggesting that your model is effective in both ruling out healthy individuals and identifying those with heart disease. Overall,the logistic regression model is well performing.
 
-
 Health data often exhibits multicollinearity, so applying ridge regression will retain the features while also shrinking them down to prevent over fitting. 
 
 ```{r}
-# Assuming 'heart_data_clean' is your cleaned dataset
-
-# Split the data into training and testing sets
-set.seed(445)  # Set seed for reproducibility
+set.seed(445) 
 split_index <- createDataPartition(heart_data_clean$target, p = 0.8, list = FALSE)
 train_data <- heart_data_clean[split_index, ]
 test_data <- heart_data_clean[-split_index, ]
@@ -340,14 +375,10 @@ test_data <- heart_data_clean[-split_index, ]
 train_data$target <- factor(train_data$target, levels = c(0, 1))
 test_data$target <- factor(test_data$target, levels = c(0, 1))
 
-# Logistic Regression Model
-logistic_model <- glm(target ~ age + sex + cp + trestbps + chol + fbs + 
-                      restecg + thalach + exang + oldpeak + slope + ca + thal,
-                      data = train_data, family = "binomial")
 
 # Ridge Regression Model
 ridge_model <- train(
-  target ~ .,  # Adjust for your actual formula
+  target ~ ., 
   data = train_data,
   method = "glmnet",
   trControl = trainControl(method = "cv", number = 5),  # Cross-validation with 5 folds
@@ -362,4 +393,84 @@ predictions_ridge <- predict(ridge_model, newdata = test_data)
 ridge_confusion <- confusionMatrix(predictions_ridge, test_data$target, positive = "1")
 print("Ridge Regression Model:")
 print(ridge_confusion)
+```
+Ridge regression was chosen as an approach for fitting a model for a few reasons. As mentioned earlier, multicollinearity in health data is ever-present and must be handled appropriately. Shrinking the coefficients of highly correlated variables makes the model more stable by preventing over fitting to the test data and reducing sensitivity to variation in the the data. This leads to improved generalization on unseen data. Finally, ridge regression can extend its regularization principles to logistic regression models, which is necessary for the binary target variable (heart disease or not).
+
+In the context of heart disease classification, it is critical to minimize the number of false negatives. The consequences for false negatives would be much greater than false positives, so creating a model that airs on the side of caution for the patients would be the best model. For this reason, sensitivity is the most important metric. This model correctly captures 97% of positive instances which is quite good. 
+
+Similar to Ridge regression, Lasso regression adds a regularization term (lambda) to the logistic regression cost function to penalize large coefficients. The key difference between the two is that Ridge regression uses Mean Squared Error as the basis for the its cost function and Lasso regression uses logistic loss as the basis of its cost function. Logistic loss is the negative log likelihood of the observed labels given the predicted probabilities. For Lasso regression, the regularization term drives the less important features to 0. With this, its main advantage is feature selection, along with the similar advantages of ridge regression.
+
+Given the multicollinearity, It is important to consider that the Lasso method makes the less significant variable coefficients exactly 0, whereas the Ridge method just shrinks the coefficients. Less severe collinearity would favor the Lasso method because its penalty term that is based off of the absolute value of the coefficients will lead to a model with only the most relevant features. However, highly correlated variables may be favored by ridge regression since the penalty term is distributed between the less significant variables more evenly. Assessing model performance for both methods is good practice. Lasso regression is performed below:
+
+```{r}
+
+# Convert the target variable to a factor with consistent levels
+heart_data_clean$target <- factor(heart_data_clean$target, levels = c(0, 1))
+
+# Split the data into training and testing sets
+set.seed(445)  # Set seed for reproducibility
+sample_indices <- sample(seq_len(nrow(heart_data_clean)), size = 0.8 * nrow(heart_data_clean))
+train_data <- heart_data_clean[sample_indices, ]
+test_data <- heart_data_clean[-sample_indices, ]
+
+# Fit the logistic regression model
+logistic_model <- glm(target ~ age + sex + cp + trestbps + chol + fbs + 
+                      restecg + thalach + exang + oldpeak + slope + ca + thal,
+                      data = train_data, family = "binomial")
+
+
+# Extract the predictor matrix and response vector
+X_train <- model.matrix(target ~ ., data = train_data)[, -1]
+y_train <- as.numeric(train_data$target) - 1  # Convert to 0 and 1
+
+# Fit the Lasso model using cross-validation
+lasso_model <- cv.glmnet(X_train, y_train, family = "binomial", alpha = 1)
+
+# Make predictions on the test set
+X_test <- model.matrix(target ~ ., data = test_data)[, -1]
+predictions_lasso <- predict(lasso_model, s = "lambda.min", newx = X_test, type = "response")
+
+
+# Evaluate the Lasso regression model
+conf_matrix_lasso <- table(observed = test_data$target, predicted = ifelse(predictions_lasso > 0.5, 1, 0))
+
+
+# Print evaluation metrics for Lasso regression
+cat("\nLasso Regression Metrics:\n")
+conf_matrix_lasso
+accuracy_lasso <- sum(diag(conf_matrix_lasso)) / sum(conf_matrix_lasso)
+sensitivity_lasso <- conf_matrix_lasso[2, 2] / sum(conf_matrix_lasso[2, ])
+specificity_lasso <- conf_matrix_lasso[1, 1] / sum(conf_matrix_lasso[1, ])
+cat("Accuracy:", accuracy_lasso, "\n")
+cat("Sensitivity:", sensitivity_lasso, "\n")
+cat("Specificity:", specificity_lasso, "\n")
+
+lasso_model_cv <- cv.glmnet(X_train, y_train, family = "binomial", alpha = 1)
+
+# Plot the cross-validated deviance
+plot(lasso_model_cv)
+
+# Identify the optimal lambda value
+optimal_lambda <- lasso_model_cv$lambda.min
+cat("Optimal Lambda:", optimal_lambda, "\n")
+
+# Make predictions on the test set with the optimal lambda
+predictions_lasso_cv <- predict(lasso_model_cv, s = optimal_lambda, newx = X_test, type = "response")
+
+# Evaluate the Lasso regression model with cross-validation
+conf_matrix_lasso_cv <- table(observed = test_data$target, predicted = ifelse(predictions_lasso_cv > 0.5, 1, 0))
+
+# Print evaluation metrics for Lasso regression with cross-validation
+cat("\nLasso Regression Metrics with Cross-Validation:\n")
+conf_matrix_lasso_cv
+accuracy_lasso_cv <- sum(diag(conf_matrix_lasso_cv)) / sum(conf_matrix_lasso_cv)
+sensitivity_lasso_cv <- conf_matrix_lasso_cv[2, 2] / sum(conf_matrix_lasso_cv[2, ])
+specificity_lasso_cv <- conf_matrix_lasso_cv[1, 1] / sum(conf_matrix_lasso_cv[1, ])
+cat("Accuracy:", accuracy_lasso_cv, "\n")
+cat("Sensitivity:", sensitivity_lasso_cv, "\n")
+cat("Specificity:", specificity_lasso_cv, "\n")
+```
+
+```{r}
+
 ```
